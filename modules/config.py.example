@@ -1,0 +1,108 @@
+# CyberRecon Configuration File
+# Copy this file to config.py and fill in your API keys
+
+# =============================================================================
+# API KEYS - REQUIRED
+# =============================================================================
+
+# Email Hunter API Key (Required for email enumeration)
+# Get your free key at: https://hunter.io/
+email_hunter_api_key = "your_hunter_key_here"
+
+# WhatCMS API Key (Required for CMS detection)
+# Get your free key at: https://whatcms.org/
+whatcms_api_key = "your_whatcms_key_here"
+
+# Wappalyzer API Key (Required for technology detection)
+# Get your free key at: https://www.wappalyzer.com/
+wappalyzer_api_key = "your_wappalyzer_key_here"
+
+# BreachDirectory API Key (Required for breach verification)
+# Get your free key at: https://breachdirectory.tk/
+breachdirectory_api_key = "your_breachdirectory_key_here"
+
+# =============================================================================
+# API KEYS - OPTIONAL (Enhanced functionality)
+# =============================================================================
+
+# Shodan API Key (Optional for IoT device search)
+# Get your key at: https://www.shodan.io/
+shodan_api_key = "your_shodan_key_here"
+
+# Censys API Credentials (Optional for device exploration)
+# Get your credentials at: https://censys.io/
+censys_api_id = "your_censys_id_here"
+censys_secret = "your_censys_secret_here"
+
+# =============================================================================
+# CONFIGURATION PARAMETERS
+# =============================================================================
+
+# DNS Resolver
+# Use a reliable DNS server for queries
+dns_resolver = "8.8.8.8"
+
+# Request Timeout
+# Delay between requests in seconds (be respectful to APIs)
+timeout = 1
+
+# Number of Threads
+# Parallel processing threads (adjust based on your system)
+num_threads = 5
+
+# Results Directory
+# Where to save scan results
+result = "results/"
+
+# =============================================================================
+# REQUEST HEADERS
+# =============================================================================
+
+# Default User-Agent for HTTP requests
+header_default = {
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36"
+}
+
+# =============================================================================
+# WORDLISTS AND PATHS
+# =============================================================================
+
+# Directory Brute Force Wordlist
+# Path to wordlist for directory brute-forcing
+Wordlist = r"/usr/share/wordlists/dirb/common.txt"
+
+# Google Dorking Wordlist
+# Path to dorks.txt file
+Dorklist = r"wordlists/dorks.txt"
+
+# =============================================================================
+# WAF DETECTION
+# =============================================================================
+
+# Payload to trigger WAF detection
+payload_WAF = "/index.php?page=....//....//etc/passwd"
+
+# =============================================================================
+# CONFIGURATION NOTES
+# =============================================================================
+
+# 1. API Keys:
+#    - Required keys are needed for basic functionality
+#    - Optional keys enhance capabilities but aren't essential
+#    - Free tiers are available for most services
+#    - Respect API rate limits and terms of service
+
+# 2. Performance:
+#    - Increase num_threads for faster scans (but respect rate limits)
+#    - Decrease timeout for faster scans (but may cause failures)
+#    - Adjust based on your internet connection and target sensitivity
+
+# 3. Security:
+#    - Never commit this file with real API keys to version control
+#    - Use environment variables for production deployments
+#    - Rotate API keys regularly
+
+# 4. Legal:
+#    - Only use on systems you own or have explicit permission to test
+#    - Comply with applicable laws and regulations
+#    - Respect robots.txt and terms of service

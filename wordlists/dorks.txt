@@ -1,0 +1,10 @@
+site:name_victim filetype:pdf
+site:name_victim filetype:txt
+site:name_victim filetype:docx
+site:name_victim filetype:xlsx
+site:name_victim filetype:log
+site:name_victim intitle:"index of"
+site:name_victim filetype:sql | filetype:dbf | filetype:mdb
+site:name_victim inurl:wp- | inurl:wp-content | inurl:plugins | inurl:uploads | inurl:themes | inurl:download
+site:name_victim filetype:bkf | filetype:bkp | filetype:bak | filetype:old | filetype:backup
+site:name_victim filetype:php intitle:phpinfo "published by the PHP Group"

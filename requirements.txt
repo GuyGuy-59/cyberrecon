@@ -1,0 +1,11 @@
+dnslib
+dnspython
+requests
+python-whois
+python3-nmap
+pyopenssl
+json2html
+bs4
+html5lib
+argparse
+lxml
