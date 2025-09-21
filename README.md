@@ -21,7 +21,7 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/cyberrecon.git
+git clone https://github.com/GuyGuy-59/cyberrecon.git
 cd cyberrecon
 
 # Install dependencies
