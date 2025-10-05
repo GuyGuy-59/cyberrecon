@@ -466,12 +466,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - Respecting terms of service
 - Ethical use of the tool
 
-## 🆘 Support
-
-- 📖 **Documentation**: [Wiki](https://github.com/yourusername/cyberrecon/wiki)
-- 🐛 **Bug Reports**: [Issues](https://github.com/yourusername/cyberrecon/issues)
-- 💬 **Discussions**: [Discussions](https://github.com/yourusername/cyberrecon/discussions)
-- 📧 **Contact**: [Email](mailto:support@cyberrecon.tool)
 
 ## 🙏 Acknowledgments
 
