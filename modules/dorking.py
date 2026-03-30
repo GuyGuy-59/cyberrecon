@@ -1,7 +1,6 @@
 import requests
 import urllib.parse
 import os
-import sys
 import time
 import random
 import json
@@ -9,17 +8,9 @@ from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 
-# Add parent directory to path for imports
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from .config import *
+from .common_utils import base_scan_meta, result_path, scan_timestamp_long
 
-# Import config after adding to path
-try:
-    from modules.config import *
-except ImportError:
-    # Fallback if module import fails
-    pass
-
-# Global lock for thread-safe operations
 results_lock = Lock()
 
 # User agents pool for rotation
@@ -162,6 +153,52 @@ def alternative_search(query, logger, debug=False):
     
     return None
 
+
+def _save_dork_scan(victim, all_results, total_results, manual_mode, logger):
+    """Write google_dorks_results.txt and .json under results/<victim>/."""
+    target_dir = result_path(victim)
+    os.makedirs(target_dir, exist_ok=True)
+    txt_path = os.path.join(target_dir, "google_dorks_results.txt")
+    json_path = os.path.join(target_dir, "google_dorks_results.json")
+    title = "Manual Google Dorking" if manual_mode else "Google Dorking"
+
+    with open(txt_path, 'w', encoding='utf-8') as f:
+        f.write(f"=== {title} Results for: {victim} ===\n")
+        f.write(f"Date: {scan_timestamp_long()}\n")
+        f.write(f"Total dorks processed: {len(all_results)}\n")
+        f.write(f"Total results found: {total_results}\n")
+        f.write("=" * 80 + "\n\n")
+        for idx, row in enumerate(all_results):
+            f.write(f"=== Dork {idx + 1}: {row['query']} ===\n")
+            f.write(f"Number of results found: {row['count']}\n")
+            if manual_mode:
+                f.write(f"Search method: {row['search_engine']}\n")
+            f.write("\n")
+            if not manual_mode and row.get('error'):
+                f.write(f"ERROR: {row.get('error_msg', 'Unable to perform search')}\n")
+            elif row.get('links'):
+                for i, link in enumerate(row['links']):
+                    f.write(f"{i + 1}. {link}\n")
+            else:
+                f.write("No results found.\n")
+            f.write("=" * 80 + "\n\n")
+
+    payload = {
+        **base_scan_meta(victim),
+        'total_dorks': len(all_results),
+        'total_results': total_results,
+        'results': all_results,
+    }
+    if manual_mode:
+        payload['manual_mode'] = True
+    with open(json_path, 'w', encoding='utf-8') as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False)
+
+    logger.info(f"{title} scan completed. {total_results} total results found.")
+    logger.info(f"Results saved in: {txt_path}")
+    logger.info(f"JSON results saved in: {json_path}")
+
+
 def manual_dork_input(victim, logger):
     """Allow manual input of dork results when automated search fails"""
     logger.info("Manual dork input mode activated")
@@ -169,12 +206,6 @@ def manual_dork_input(victim, logger):
     print("Since automated search is blocked, you can manually input results.")
     print("For each dork, enter the URLs you found manually (one per line, empty line to finish):")
     print("="*60)
-    
-    # Read dorks from file
-    try:
-        from modules.config import Dorklist
-    except ImportError:
-        Dorklist = "wordlists/dorks.txt"
     
     if not os.path.exists(Dorklist):
         logger.error(f"Dorks file not found: {Dorklist}")
@@ -381,67 +412,12 @@ def process_dork(dork, victim, logger, debug=False):
 def scan_dorks(victim, logger, debug=False, manual_mode=False):
     """Scan target with Google Dorks using parallel processing"""
     logger.info(f"Starting Google Dorking scan for: {victim}")
-    
-    # Define variables locally to avoid import issues
-    try:
-        from modules.config import result, num_threads, timeout, Dorklist
-    except ImportError:
-        result = "results/"
-        num_threads = 5
-        timeout = 1
-        Dorklist = "wordlists/dorks.txt"
-    
-    # If manual mode is requested, use manual input
+
     if manual_mode:
         all_results = manual_dork_input(victim, logger)
         if all_results:
-            # Save manual results
-            target_dir = os.path.join(result, victim)
-            if not os.path.exists(target_dir):
-                os.makedirs(target_dir, exist_ok=True)
-            
-            output_file = os.path.join(target_dir, "google_dorks_results.txt")
-            json_output_file = os.path.join(target_dir, "google_dorks_results.json")
-            
-            total_results = sum(result['count'] for result in all_results)
-            
-            # Write results to files
-            with open(output_file, 'w', encoding='utf-8') as f:
-                f.write(f"=== Manual Google Dorking Results for: {victim} ===\n")
-                f.write(f"Date: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-                f.write(f"Total dorks processed: {len(all_results)}\n")
-                f.write(f"Total results found: {total_results}\n")
-                f.write("="*80 + "\n\n")
-                
-                for dork_index, result in enumerate(all_results):
-                    f.write(f"=== Dork {dork_index + 1}: {result['query']} ===\n")
-                    f.write(f"Number of results found: {result['count']}\n")
-                    f.write(f"Search method: {result['search_engine']}\n\n")
-                    
-                    if result['links']:
-                        for link_index, link in enumerate(result['links']):
-                            f.write(f"{link_index + 1}. {link}\n")
-                    else:
-                        f.write("No results found.\n")
-                    
-                    f.write("="*80 + "\n\n")
-            
-            # Also save as JSON
-            import json
-            with open(json_output_file, 'w', encoding='utf-8') as f:
-                json.dump({
-                    'target': victim,
-                    'scan_date': time.strftime('%Y-%m-%d %H:%M'),
-                    'total_dorks': len(all_results),
-                    'total_results': total_results,
-                    'manual_mode': True,
-                    'results': all_results
-                }, f, indent=2, ensure_ascii=False)
-            
-            logger.info(f"Manual dorking scan completed. {total_results} total results found.")
-            logger.info(f"Results saved in: {output_file}")
-            logger.info(f"JSON results saved in: {json_output_file}")
-        
+            total = sum(r['count'] for r in all_results)
+            _save_dork_scan(victim, all_results, total, True, logger)
         return
     
     # Check if dorks file exists
@@ -462,16 +438,7 @@ def scan_dorks(victim, logger, debug=False, manual_mode=False):
         return
     
     logger.info(f"Loading {len(google_dorks)} dorks")
-    
-    # Create results directory for target
-    target_dir = os.path.join(result, victim)
-    if not os.path.exists(target_dir):
-        os.makedirs(target_dir, exist_ok=True)
-    
-    # File to save information
-    output_file = os.path.join(target_dir, "google_dorks_results.txt")
-    json_output_file = os.path.join(target_dir, "google_dorks_results.json")
-    
+
     total_results = 0
     all_results = []
     
@@ -505,43 +472,10 @@ def scan_dorks(victim, logger, debug=False, manual_mode=False):
                     'error_msg': str(e)
                 })
     
-    # Sort results by count (descending) for better organization
     all_results.sort(key=lambda x: x['count'], reverse=True)
-    
-    # Write results to files
-    with open(output_file, 'w', encoding='utf-8') as f:
-        f.write(f"=== Google Dorking Results for: {victim} ===\n")
-        f.write(f"Date: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write(f"Total dorks processed: {len(all_results)}\n")
-        f.write(f"Total results found: {total_results}\n")
-        f.write("="*80 + "\n\n")
-        
-        for dork_index, result in enumerate(all_results):
-            f.write(f"=== Dork {dork_index + 1}: {result['query']} ===\n")
-            f.write(f"Number of results found: {result['count']}\n\n")
-            
-            if result.get('error'):
-                f.write(f"ERROR: {result.get('error_msg', 'Unable to perform search')}\n")
-            elif result['links']:
-                for link_index, link in enumerate(result['links']):
-                    f.write(f"{link_index + 1}. {link}\n")
-            else:
-                f.write("No results found.\n")
-            
-            f.write("="*80 + "\n\n")
-    
-    # Also save as JSON for programmatic access
-    import json
-    with open(json_output_file, 'w', encoding='utf-8') as f:
-        json.dump({
-            'target': victim,
-            'scan_date': time.strftime('%Y-%m-%d %H:%M'),
-            'total_dorks': len(all_results),
-            'total_results': total_results,
-            'results': all_results
-        }, f, indent=2, ensure_ascii=False)
-    
-    logger.info(f"Google Dorking scan completed. {total_results} total results found.")
-    logger.info(f"Results saved in: {output_file}")
-    logger.info(f"JSON results saved in: {json_output_file}")
+    _save_dork_scan(victim, all_results, total_results, False, logger)
 
+
+def run(victim, logger):
+    """Entry point for the module: runs the full Google dorking pipeline."""
+    return scan_dorks(victim, logger)

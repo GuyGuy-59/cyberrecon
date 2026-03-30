@@ -5,7 +5,7 @@ CyberRecon is a command-line OSINT (Open Source Intelligence) tool for domain an
 ## Features
 
 - Eleven modules selectable individually or as a full run (`-m` / `--modules`).
-- Module definitions and `--list-modules` categories stored in [`modules.json`](modules.json) (add or adjust modules without editing the main script logic beyond wiring).
+- Module definitions and `--list-modules` categories stored in [`modules.json`](modules.json); each module exposes a standard **`run(target, logger)`** entrypoint while internal helpers remain callable for testing or reuse.
 - Pre-scan configuration validation via `modules/config_checker.py`.
 - Logging to `results/` with a per-target log file when a target is set.
 - UTF-8 handling for logs and outputs.
@@ -76,7 +76,7 @@ python cyberrecon.py example.com -v
 | ID | Role |
 |----|------|
 | `dorking` | Google dorking |
-| `browse` | robots.txt / URL exploration (entrypoint: `scan_robots`) |
+| `browse` | robots.txt, `.well-known`, and directory probing (`run` → `scan_robots` and follow-on steps) |
 | `scan` | Port scan (Nmap) |
 | `ip` | IP / geolocation context |
 | `headers` | HTTP security headers (incl. observatory-style checks) |
@@ -93,16 +93,24 @@ Categories shown by `--list-modules` come from `modules.json` (`categories`).
 
 [`modules.json`](modules.json) holds:
 
-- **`modules`**: for each module id, `display_name`, Python `package`, and entrypoint `function`.
+- **`modules`**: for each module id, `display_name`, Python `package`, and entrypoint **`function`** (conventionally **`run`**).
 - **`categories`**: sections for `--list-modules` (each item: `id` + `description`).
 
 Every id under `modules` must appear exactly once across `categories`, and vice versa, or the tool raises an error when listing modules.
 
+The main script imports the module and calls `function(target, logger)`. Modules that need a resolved IPv4 address (for example `scan`, `ip`, `iot`) return a sentinel (`SKIP_RESOLUTION_FAILED`) when DNS resolution fails; the CLI reports those runs as skipped.
+
+## Shared utilities
+
+- **`modules/common_utils.py`**: paths under the configured `result` directory (`result_path`), timestamps (`scan_timestamp` / `scan_timestamp_long`), JSON metadata helpers (`base_scan_meta` / `base_scan_meta_long` with `target` and `scan_date`), and `save_json_result` / `save_json_file`.
+- **`modules/run_utils.py`**: `run_safe` and `run_safe_steps` to run sub-steps without aborting the whole module on a single failure (used in DNS, browse, site analysis, and similar).
+
 ## Output
 
 - **Directory**: `results/` (configurable via `result` in `modules/config.py`).
-- **Per target**: e.g. `results/example.com/` with JSON from each module (names vary by module).
-- **Logs**: e.g. `results/cyberrecon_example_com.log` for a given target.
+- **Per target**: e.g. `results/example.com/` with JSON from each module (filenames vary by module).
+- **Logs**: e.g. `results/cyberrecon_example_com.log` for a given target (paths built with the same `result` root as artifacts).
+- **JSON metadata**: most exports include **`target`** and **`scan_date`** (minute precision, or with seconds where `base_scan_meta_long` is used). Older keys such as standalone `timestamp` or `analysis_date` may have been merged into this pattern in recent versions; adjust any external parsers accordingly.
 
 ## Project layout
 
@@ -117,6 +125,8 @@ cyberrecon/
 │   ├── config.py           # Your configuration (from .example)
 │   ├── config.py.example
 │   ├── config_checker.py
+│   ├── common_utils.py     # Paths, timestamps, JSON helpers
+│   ├── run_utils.py        # run_safe / run_safe_steps
 │   ├── browseUrl.py
 │   ├── crtsh.py
 │   ├── dns_info.py

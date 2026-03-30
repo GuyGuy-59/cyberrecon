@@ -2,15 +2,11 @@ import re
 import dnslib
 import dns.resolver
 import dns.zone
-import socket
-import ssl
 import dns.query
-import dns.message
-import dns.rdata
-import json
-import os
-import time
 from .config import *
+from .common_utils import base_scan_meta, save_json_result
+from .run_utils import run_safe_steps
+
 
 def req_dns_types(victim, logger):
     """Enhanced DNS record enumeration with better error handling and structured output"""
@@ -18,10 +14,9 @@ def req_dns_types(victim, logger):
     
     types = ['A', 'AAAA', 'CAA', 'CNAME', 'MX', 'NS', 'TXT', 'DNSKEY', 'DS', 'SOA']
     dns_results = {
-        'target': victim,
-        'scan_date': time.strftime('%Y-%m-%d %H:%M'),
+        **base_scan_meta(victim),
         'records': {},
-        'total_records': 0
+        'total_records': 0,
     }
     
     for record_type in types:
@@ -54,19 +49,8 @@ def req_dns_types(victim, logger):
     # Calculate total records
     dns_results['total_records'] = sum(len(records) for records in dns_results['records'].values())
     
-    # Save results to file
-    try:
-        results_dir = os.path.join(result, victim)
-        os.makedirs(results_dir, exist_ok=True)
-        
-        filename = os.path.join(results_dir, "dns_records.json")
-        with open(filename, 'w') as f:
-            json.dump(dns_results, f, indent=4, ensure_ascii=False)
-        
-        logger.info(f"DNS records saved to: {filename}")
-    except Exception as e:
-        logger.error(f"Failed to save DNS records: {e}")
-    
+    save_json_result(victim, "dns_records.json", dns_results, logger, "DNS records")
+
     # Display summary
     logger.info(f"\n--- DNS Records Summary for {victim} ---")
     logger.info(f"Total records found: {dns_results['total_records']}")
@@ -74,7 +58,7 @@ def req_dns_types(victim, logger):
     for record_type, records in dns_results['records'].items():
         if records:
             logger.info(f"{record_type}: {len(records)} records")
-    
+
     return dns_results
 
 def check_dns_caa(victim, logger):
@@ -82,10 +66,9 @@ def check_dns_caa(victim, logger):
     logger.info(f"Checking CAA records for: {victim}")
     
     caa_results = {
-        'target': victim,
-        'scan_date': time.strftime('%Y-%m-%d %H:%M'),
+        **base_scan_meta(victim),
         'caa_records': [],
-        'caa_found': False
+        'caa_found': False,
     }
     
     try:
@@ -118,19 +101,7 @@ def check_dns_caa(victim, logger):
         logger.error(f"Error checking CAA records: {e}")
         caa_results['error'] = str(e)
     
-    # Save results
-    try:
-        results_dir = os.path.join(result, victim)
-        os.makedirs(results_dir, exist_ok=True)
-        
-        filename = os.path.join(results_dir, "caa_records.json")
-        with open(filename, 'w') as f:
-            json.dump(caa_results, f, indent=4, ensure_ascii=False)
-        
-        logger.info(f"CAA records saved to: {filename}")
-    except Exception as e:
-        logger.error(f"Failed to save CAA records: {e}")
-    
+    save_json_result(victim, "caa_records.json", caa_results, logger, "CAA records")
     return caa_results
 
 
@@ -139,11 +110,10 @@ def check_dns_mx(victim, logger):
     logger.info(f"Checking email security records for: {victim}")
     
     email_security_results = {
-        'target': victim,
-        'scan_date': time.strftime('%Y-%m-%d %H:%M'),
+        **base_scan_meta(victim),
         'spf': {'found': False, 'policies': [], 'analysis': []},
         'dkim': {'found': False, 'selectors': [], 'records': []},
-        'dmarc': {'found': False, 'policy': None, 'records': []}
+        'dmarc': {'found': False, 'policy': None, 'records': []},
     }
     
     # Check SPF
@@ -265,20 +235,8 @@ def check_dns_mx(victim, logger):
     except Exception as e:
         logger.error(f"Error checking DMARC records: {e}")
     
-    # Save results
-    try:
-        results_dir = os.path.join(result, victim)
-        os.makedirs(results_dir, exist_ok=True)
-        
-        filename = os.path.join(results_dir, "email_security_records.json")
-        with open(filename, 'w') as f:
-            json.dump(email_security_results, f, indent=4, ensure_ascii=False)
-        
-        logger.info(f"Email security records saved to: {filename}")
-    except Exception as e:
-        logger.error(f"Failed to save email security records: {e}")
-    
-    # Display summary
+    save_json_result(victim, "email_security_records.json", email_security_results, logger, "Email security records")
+
     logger.info(f"\n--- Email Security Summary for {victim} ---")
     logger.info(f"SPF: {'✓ Found' if email_security_results['spf']['found'] else '✗ Not found'}")
     logger.info(f"DKIM: {'✓ Found' if email_security_results['dkim']['found'] else '✗ Not found'}")
@@ -292,11 +250,10 @@ def dns_zone_xfer(victim, logger):
     logger.info(f"Testing DNS zone transfer for: {victim}")
     
     zone_transfer_results = {
-        'target': victim,
-        'scan_date': time.strftime('%Y-%m-%d %H:%M'),
+        **base_scan_meta(victim),
         'nameservers': [],
         'zone_transfer_attempts': [],
-        'vulnerable_servers': []
+        'vulnerable_servers': [],
     }
     
     my_resolver = dns.resolver.Resolver()
@@ -360,20 +317,8 @@ def dns_zone_xfer(victim, logger):
         logger.error(f"Error during zone transfer test: {e}")
         zone_transfer_results['error'] = str(e)
     
-    # Save results
-    try:
-        results_dir = os.path.join(result, victim)
-        os.makedirs(results_dir, exist_ok=True)
-        
-        filename = os.path.join(results_dir, "zone_transfer_test.json")
-        with open(filename, 'w') as f:
-            json.dump(zone_transfer_results, f, indent=4, ensure_ascii=False)
-        
-        logger.info(f"Zone transfer test results saved to: {filename}")
-    except Exception as e:
-        logger.error(f"Failed to save zone transfer results: {e}")
-    
-    # Display summary
+    save_json_result(victim, "zone_transfer_test.json", zone_transfer_results, logger, "Zone transfer test results")
+
     logger.info(f"\n--- Zone Transfer Test Summary for {victim} ---")
     vulnerable_count = len(zone_transfer_results['vulnerable_servers'])
     if vulnerable_count > 0:
@@ -383,79 +328,17 @@ def dns_zone_xfer(victim, logger):
     
     return zone_transfer_results
 
-def verify_tls_connection(server, port, logger):
-    """Enhanced TLS connection verification with better error handling"""
-    try:
-        sock = socket.create_connection((server, port), timeout=10)
-        context = ssl.create_default_context()
-        context.check_hostname = False
-        context.verify_mode = ssl.CERT_NONE
 
-        with context.wrap_socket(sock, server_hostname=server) as ssock:
-            logger.info(f"✓ TLS connection successful with {server}:{port}")
-            return True
-    except socket.timeout:
-        logger.error(f"TLS connection timeout with {server}:{port}")
-        return False
-    except ConnectionRefusedError:
-        logger.error(f"TLS connection refused by {server}:{port}")
-        return False
-    except Exception as e:
-        logger.error(f"TLS connection error with {server}:{port}: {e}")
-        return False
-
-def check_query_dot(server, domain, logger, port=853):
-    """Enhanced DNS over TLS query with structured output"""
-    logger.info(f"Testing DNS over TLS with {server}:{port} for {domain}")
-    
-    dot_results = {
-        'server': server,
-        'port': port,
-        'domain': domain,
-        'scan_date': time.strftime('%Y-%m-%d %H:%M'),
-        'connection_successful': False,
-        'query_successful': False,
-        'records': []
-    }
-    
-    if not verify_tls_connection(server, port, logger):
-        logger.error(f"Unable to contact DoT server at {server}:{port}")
-        return dot_results
-    
-    dot_results['connection_successful'] = True
-
-    try:
-        query = dns.message.make_query(domain, dns.rdatatype.A)
-        context = ssl.create_default_context()
-        context.check_hostname = False
-        context.verify_mode = ssl.CERT_NONE
-
-        response = dns.query.tls(query, server, port=port, timeout=10, ssl_context=context)
-        dot_results['query_successful'] = True
-
-        logger.info(f"✓ DNS over TLS query successful")
-        logger.info(f"Response from {server}:{port} for {domain} (type A):")
-        
-        for answer in response.answer:
-            record_str = str(answer)
-            dot_results['records'].append(record_str)
-            logger.info(f"  {record_str}")
-
-    except Exception as e:
-        logger.error(f"DNS over TLS query error: {e}")
-        dot_results['error'] = str(e)
-    
-    # Save results
-    try:
-        results_dir = os.path.join(result, domain)
-        os.makedirs(results_dir, exist_ok=True)
-        
-        filename = os.path.join(results_dir, f"dot_test_{server.replace('.', '_')}.json")
-        with open(filename, 'w') as f:
-            json.dump(dot_results, f, indent=4, ensure_ascii=False)
-        
-        logger.info(f"DNS over TLS test results saved to: {filename}")
-    except Exception as e:
-        logger.error(f"Failed to save DNS over TLS results: {e}")
-    
-    return dot_results
+def run(victim, logger):
+    """Entry point: core DNS types, CAA, MX/email security, zone transfer, DoT."""
+    dns_results = req_dns_types(victim, logger)
+    logger.info("\n--- Extended DNS checks (CAA, email security, zone transfer, DoT) ---")
+    run_safe_steps(
+        logger,
+        [
+            ("CAA (structured)", check_dns_caa, (victim, logger)),
+            ("Email security (SPF/DKIM/DMARC)", check_dns_mx, (victim, logger)),
+            ("Zone transfer", dns_zone_xfer, (victim, logger)),
+        ],
+    )
+    return dns_results

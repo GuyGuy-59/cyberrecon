@@ -9,7 +9,7 @@ import os
 import json
 import argparse
 import logging
-import socket
+from modules.common_utils import SKIP_RESOLUTION_FAILED, result_path
 from modules.config import *
 
 _MODULES_MANIFEST_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "modules.json")
@@ -35,10 +35,9 @@ def setup_logging(target=None):
     if target:
         # Create target-specific log file
         log_filename = f'cyberrecon_{target.replace(".", "_").replace("/", "_")}.log'
-        file_handler = logging.FileHandler(f'{result}{log_filename}', encoding='utf-8')
+        file_handler = logging.FileHandler(result_path(log_filename), encoding='utf-8')
     else:
-        # Fallback to general log file
-        file_handler = logging.FileHandler(f'{result}cyberrecon.log', encoding='utf-8')
+        file_handler = logging.FileHandler(result_path("cyberrecon.log"), encoding='utf-8')
     
     file_handler.setFormatter(formatter)
     
@@ -153,30 +152,10 @@ def run_modules(target, selected_modules, logger):
             logger.info(f"Starting {name} analysis...")
             module = __import__(module_name, fromlist=[function_name])
             function = getattr(module, function_name)
-            
-            # Special handling for functions that need different parameters
-            if function_name == "scan_victim":
-                try:
-                    target_ip = socket.gethostbyname(target)
-                    function(target, target_ip, logger)
-                except socket.gaierror:
-                    logger.warning(f"Could not resolve IP for {target}, skipping scan")
-                    results.append((name, "⚠ Skipped (IP resolution failed)"))
-                    continue
-            elif function_name == "scan_robots":
-                function(target, f"https://{target}", logger)
-            elif function_name == "device_shodan":
-                # Try to get IP for Shodan
-                try:
-                    target_ip = socket.gethostbyname(target)
-                    function(target, target_ip, logger)
-                except socket.gaierror:
-                    logger.warning(f"Could not resolve IP for {target}, skipping Shodan")
-                    results.append((name, "⚠ Skipped (IP resolution failed)"))
-                    continue
-            else:
-                function(target, logger)
-            
+            ret = function(target, logger)
+            if ret is SKIP_RESOLUTION_FAILED:
+                results.append((name, "⚠ Skipped (IP resolution failed)"))
+                continue
             results.append((name, "✓ Completed"))
             logger.info(f"✓ {name} analysis completed")
             

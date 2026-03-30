@@ -1,12 +1,13 @@
 import requests
 import time
 import os
-import json
 from bs4 import BeautifulSoup
+
+from .common_utils import save_json_result
+from .run_utils import run_safe_steps
 from threading import Thread, Lock
 from queue import Queue
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 from .config import *
 
 # Global variables for thread-safe operations
@@ -15,33 +16,17 @@ list_lock = Lock()
 discovered_url = list()
 
 def request_victim(url, timeout=10, max_retries=3):
-    """Enhanced request function with retry mechanism and better error handling"""
+    """GET with retries; ignores TLS verification (scanner use case)."""
     for attempt in range(max_retries):
         try:
-            result = requests.get(
-                url, 
-                headers=header_default, 
+            return requests.get(
+                url,
+                headers=header_default,
                 timeout=timeout,
                 allow_redirects=True,
-                verify=False
+                verify=False,
             )
-            return result
-        except requests.exceptions.HTTPError as e:
-            if attempt == max_retries - 1:
-                print(f"HTTP error {e} for URL {url}")
-            else:
-                time.sleep(1)
-        except requests.exceptions.ConnectionError:
-            if attempt == max_retries - 1:
-                print(f"Connection error for URL {url}")
-            else:
-                time.sleep(1)
-        except requests.exceptions.Timeout:
-            if attempt == max_retries - 1:
-                print(f"Timeout for URL {url}")
-            else:
-                time.sleep(1)
-        except requests.exceptions.RequestException as e:
+        except requests.RequestException as e:
             if attempt == max_retries - 1:
                 print(f"Request error {e} for URL {url}")
             else:
@@ -98,23 +83,39 @@ def extract_title(html):
     except:
         return 'Error extracting title'
 
+
+def _reset_queue_state():
+    """Clear shared queue and result list between scan phases."""
+    with q.mutex:
+        q.queue.clear()
+    discovered_url.clear()
+
+
+def _start_workers_join_stop(victim_url, logger):
+    """Enqueue is already done; start pool, drain queue, signal workers to exit."""
+    for _ in range(num_threads):
+        Thread(target=make_request_th, args=(victim_url, logger), daemon=True).start()
+    q.join()
+    for _ in range(num_threads):
+        q.put(None)
+
+
 def scan_robots(victim, victim_url, logger):
     """Enhanced robots.txt scanner with better parsing and results saving"""
     global q, discovered_url
-    
+
     robots_url = urljoin(victim_url, '/robots.txt')
     res = request_victim(robots_url)
-    
+
     if res is None or res.status_code != 200:
         logger.info('[-] Robots.txt not found!')
         return False
 
     logger.info('\n[*] Scanning robots.txt')
-    
-    # Parse robots.txt more robustly
+
     robots_content = res.text
     res.close()
-    
+
     disallowed_paths = []
     for line in robots_content.split('\n'):
         line = line.strip()
@@ -122,57 +123,37 @@ def scan_robots(victim, victim_url, logger):
             path = line.split(' ', 1)[1].strip()
             if path and path != '/':
                 disallowed_paths.append(path)
-    
+
     if not disallowed_paths:
         logger.info("[-] No disallowed paths found in robots.txt")
         return False
-    
+
     logger.info(f"[*] Found {len(disallowed_paths)} disallowed paths")
-    
-    # Add paths to queue
+
     for path in disallowed_paths:
         q.put(path)
-    
-    # Start worker threads
-    workers = []
-    for t in range(num_threads):
-        worker = Thread(target=make_request_th, args=(victim_url, logger))
-        worker.daemon = True
-        worker.start()
-        workers.append(worker)
-    
-    # Wait for completion
-    q.join()
-    
-    # Stop workers
-    for _ in range(num_threads):
-        q.put(None)
-    
-    # Process and save results
+    _start_workers_join_stop(victim_url, logger)
+
     if discovered_url:
         logger.info(f"\n[+] Found {len(discovered_url)} interesting directories")
-        
-        # Save results to file
-        results_file = os.path.join(result, victim, "robots_scan_results.json")
-        os.makedirs(os.path.dirname(results_file), exist_ok=True)
-        
-        with open(results_file, 'w') as f:
-            json.dump(discovered_url, f, indent=2)
-        
-        # Log results
+        save_json_result(
+            victim,
+            "robots_scan_results.json",
+            discovered_url,
+            logger,
+            "Robots.txt crawl results",
+            indent=2,
+        )
         for item in discovered_url:
             logger.info(f'[+] {item["url"]} - {item["status_code"]} - {item["title"]}')
     else:
         logger.info("[-] No interesting directories found")
-    
-    # Cleanup
-    with q.mutex:
-        q.queue.clear()
-    discovered_url.clear()
-    
+
+    _reset_queue_state()
     return True
 
-def scan_wellkown(victim_url, logger):
+
+def scan_wellkown(victim, victim_url, logger):
     """Enhanced .well-known scanner with comprehensive list and better results handling"""
     global q, discovered_url
     
@@ -191,48 +172,28 @@ def scan_wellkown(victim_url, logger):
     
     logger.info(f"\n[*] Starting .well-known scan with {len(wellknown_list)} endpoints")
     
-    # Add all well-known endpoints to queue
     for wellknown in wellknown_list:
         q.put(f".well-known/{wellknown}")
+    _start_workers_join_stop(victim_url, logger)
     
-    # Start worker threads
-    workers = []
-    for t in range(num_threads):
-        worker = Thread(target=make_request_th, args=(victim_url, logger))
-        worker.daemon = True
-        worker.start()
-        workers.append(worker)
-    
-    # Wait for completion
-    q.join()
-    
-    # Stop workers
-    for _ in range(num_threads):
-        q.put(None)
-    
-    # Process and save results
     if discovered_url:
         logger.info(f'[+] Found {len(discovered_url)} .well-known endpoints')
-        
-        # Save results to file
-        results_file = os.path.join(result, "wellknown_scan_results.json")
-        os.makedirs(os.path.dirname(results_file), exist_ok=True)
-        
-        with open(results_file, 'w') as f:
-            json.dump(discovered_url, f, indent=2)
-        
-        # Log results with more details
+        save_json_result(
+            victim,
+            "wellknown_scan_results.json",
+            discovered_url,
+            logger,
+            ".well-known scan results",
+            indent=2,
+        )
         for item in discovered_url:
             logger.info(f"[+] {item['url']} - {item['status_code']} - {item['title']}")
     else:
         logger.info('[-] No .well-known endpoints found')
     
-    # Cleanup
-    with q.mutex:
-        q.queue.clear()
-    discovered_url.clear()
+    _reset_queue_state()
 
-def dirs_brute(victim_url, logger):
+def dirs_brute(victim, victim_url, logger):
     """Enhanced directory brute force with better wordlist handling and progress tracking"""
     global q, discovered_url
     
@@ -259,45 +220,38 @@ def dirs_brute(victim_url, logger):
     
     logger.info(f"\n[*] Starting directory brute force with {len(_dirs)} entries")
     
-    # Add directories to queue
-    for _dir in _dirs:
-        q.put(_dir)
-    
-    # Start worker threads
-    workers = []
-    for t in range(num_threads):
-        worker = Thread(target=make_request_th, args=(victim_url, logger))
-        worker.daemon = True
-        worker.start()
-        workers.append(worker)
-    
-    # Wait for completion
-    q.join()
-    
-    # Stop workers
-    for _ in range(num_threads):
-        q.put(None)
+    for path in _dirs:
+        q.put(path)
+    _start_workers_join_stop(victim_url, logger)
     
     logger.info('[*] Directory scan complete!')
     
-    # Process and save results
     if discovered_url:
         logger.info(f'[+] Found {len(discovered_url)} interesting directories')
-        
-        # Save results to file
-        results_file = os.path.join(result, "directory_brute_results.json")
-        os.makedirs(os.path.dirname(results_file), exist_ok=True)
-        
-        with open(results_file, 'w') as f:
-            json.dump(discovered_url, f, indent=2)
-        
-        # Log results with more details
+        save_json_result(
+            victim,
+            "directory_brute_results.json",
+            discovered_url,
+            logger,
+            "Directory brute force results",
+            indent=2,
+        )
         for item in discovered_url:
             logger.info(f"[+] {item['url']} - {item['status_code']} - {item['title']}")
     else:
         logger.info('[-] No interesting directories found')
     
-    # Cleanup
-    with q.mutex:
-        q.queue.clear()
-    discovered_url.clear()
+    _reset_queue_state()
+
+
+def run(victim, logger):
+    """Entry point: robots.txt crawl (then .well-known and directory brute force)."""
+    victim_url = f"https://{victim}"
+    scan_robots(victim, victim_url, logger)
+    run_safe_steps(
+        logger,
+        [
+            (".well-known scan", scan_wellkown, (victim, victim_url, logger)),
+            ("Directory brute force", dirs_brute, (victim, victim_url, logger)),
+        ],
+    )

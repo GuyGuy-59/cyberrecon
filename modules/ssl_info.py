@@ -1,10 +1,15 @@
-import os
 import ssl
 import socket
 import requests
 import time
 import json
 from .config import *
+from .common_utils import (
+    base_scan_meta_long,
+    result_path,
+    save_json_file,
+    save_json_result,
+)
 from collections import OrderedDict
 from bs4 import BeautifulSoup
 
@@ -12,9 +17,7 @@ def scanssl(victim, logger, max_wait_time=300):
     """Enhanced SSL Labs analysis with better error handling and progress tracking"""
     logger.info(f"Starting SSL Labs analysis for: {victim}")
     
-    ssl_file = os.path.join(result, victim, f"ssl_{victim}.json")
-    os.makedirs(os.path.dirname(ssl_file), exist_ok=True)
-    
+    ssl_file = result_path(victim, f"ssl_{victim}.json")
     url = f'https://api.ssllabs.com/api/v3/analyze?host={victim}&ignoreMismatch=on&all=done'
     logger.info(f"Requesting SSL Labs analysis: {url}")
     
@@ -54,16 +57,10 @@ def scanssl(victim, logger, max_wait_time=300):
         logger.error("SSL Labs analysis timed out")
         return None
 
-    # Save raw response
-    try:
-        with open(ssl_file, 'w') as outfile:
-            json.dump(j, outfile, indent=4)
-        logger.info(f"SSL Labs data saved to: {ssl_file}")
-    except Exception as e:
-        logger.error(f"Failed to save SSL Labs data: {e}")
+    save_json_file(ssl_file, j, logger, "SSL Labs raw response")
 
-    # Initialize data structure with default values
     data = {
+        **base_scan_meta_long(victim),
         'hostname': victim,
         'serverName': victim,
         'grade': 'Unknown',
@@ -76,8 +73,7 @@ def scanssl(victim, logger, max_wait_time=300):
         'logjam': False,
         'supportsRc4': False,
         'TLS': [],
-        'analysis_date': time.strftime('%Y-%m-%d %H:%M:%S'),
-        'endpoints': []
+        'endpoints': [],
     }
 
     # Get first endpoint and its details
@@ -112,10 +108,9 @@ def requests_analyze_TLS(victim, logger):
     logger.info(f"Starting TLS analysis for: {victim}")
     
     data = {
-        'target': victim,
-        'analysis_date': time.strftime('%Y-%m-%d %H:%M:%S'),
+        **base_scan_meta_long(victim),
         'domains_tested': [],
-        'results': {}
+        'results': {},
     }
     
     base_url = "https://tls.imirhil.fr/https/"
@@ -158,11 +153,8 @@ def requests_analyze_TLS(victim, logger):
             data['domains_tested'].append(domain)
             data['results'][domain] = domain_data
             
-        except requests.RequestException as e:
-            logger.error(f"Error testing TLS for {domain}: {e}")
-            data['results'][domain] = {'error': str(e)}
         except Exception as e:
-            logger.error(f"Unexpected error testing TLS for {domain}: {e}")
+            logger.error(f"Error testing TLS for {domain}: {e}")
             data['results'][domain] = {'error': str(e)}
     
     return data
@@ -179,25 +171,13 @@ def analyze_Transport_Layer_Security(victim, logger):
     
     # Combine results
     combined_results = {
-        'target': victim,
-        'analysis_date': time.strftime('%Y-%m-%d %H:%M:%S'),
+        **base_scan_meta_long(victim),
         'tls_analysis': data_tls_imirhil,
-        'ssl_labs_analysis': data_ssllabs
+        'ssl_labs_analysis': data_ssllabs,
     }
     
-    # Save combined results
-    try:
-        results_dir = os.path.join(result, victim)
-        os.makedirs(results_dir, exist_ok=True)
-        
-        filename = os.path.join(results_dir, "ssl_tls_analysis.json")
-        with open(filename, 'w') as f:
-            json.dump(combined_results, f, indent=4, ensure_ascii=False)
-        
-        logger.info(f"SSL/TLS analysis saved to: {filename}")
-    except Exception as e:
-        logger.error(f"Failed to save SSL/TLS analysis: {e}")
-    
+    save_json_result(victim, "ssl_tls_analysis.json", combined_results, logger, "SSL/TLS analysis")
+
     # Display results in a readable format
     logger.info(f"\n--- SSL/TLS Analysis Results for {victim} ---")
     
@@ -206,21 +186,15 @@ def analyze_Transport_Layer_Security(victim, logger):
         logger.info(f"Has Warnings: {data_ssllabs.get('hasWarnings', False)}")
         logger.info(f"Is Exceptional: {data_ssllabs.get('isExceptional', False)}")
         
-        # Security vulnerabilities
-        vulnerabilities = []
-        if data_ssllabs.get('heartbleed'):
-            vulnerabilities.append("Heartbleed")
-        if data_ssllabs.get('vulnBeast'):
-            vulnerabilities.append("BEAST")
-        if data_ssllabs.get('poodle'):
-            vulnerabilities.append("POODLE")
-        if data_ssllabs.get('freak'):
-            vulnerabilities.append("FREAK")
-        if data_ssllabs.get('logjam'):
-            vulnerabilities.append("Logjam")
-        if data_ssllabs.get('supportsRc4'):
-            vulnerabilities.append("RC4 Support")
-        
+        vuln_flags = (
+            ('heartbleed', 'Heartbleed'),
+            ('vulnBeast', 'BEAST'),
+            ('poodle', 'POODLE'),
+            ('freak', 'FREAK'),
+            ('logjam', 'Logjam'),
+            ('supportsRc4', 'RC4 Support'),
+        )
+        vulnerabilities = [label for key, label in vuln_flags if data_ssllabs.get(key)]
         if vulnerabilities:
             logger.warning(f"Security vulnerabilities found: {', '.join(vulnerabilities)}")
         else:
@@ -242,3 +216,8 @@ def analyze_Transport_Layer_Security(victim, logger):
                 logger.info(f"  {domain}: Score {score}, TLS versions: {', '.join(tls_versions)}")
     
     return combined_results
+
+
+def run(victim, logger):
+    """Entry point: local TLS probe + SSL Labs analysis."""
+    return analyze_Transport_Layer_Security(victim, logger)

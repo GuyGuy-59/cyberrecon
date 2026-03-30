@@ -3,37 +3,25 @@ import json
 import time
 import os
 import re
+from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 from .config import *
+from .common_utils import base_scan_meta, save_json_result, scan_timestamp
+from .run_utils import run_safe_steps
+
 
 def request_victim(url, logger, timeout=15, max_retries=3):
-    """Enhanced request function with retry mechanism and better error handling"""
     for attempt in range(max_retries):
         try:
-            result = requests.get(
-                url, 
-                headers=header_default, 
+            r = requests.get(
+                url,
+                headers=header_default,
                 timeout=timeout,
-                allow_redirects=True
+                allow_redirects=True,
             )
-            result.raise_for_status()
-            return result
-        except requests.exceptions.HTTPError as e:
-            if attempt == max_retries - 1:
-                logger.error(f"HTTP error {e} for URL {url}")
-            else:
-                time.sleep(2 ** attempt)
-        except requests.exceptions.ConnectionError:
-            if attempt == max_retries - 1:
-                logger.error(f"Connection error for URL {url}")
-            else:
-                time.sleep(2 ** attempt)
-        except requests.exceptions.Timeout:
-            if attempt == max_retries - 1:
-                logger.error(f"Timeout for URL {url}")
-            else:
-                time.sleep(2 ** attempt)
-        except requests.exceptions.RequestException as e:
+            r.raise_for_status()
+            return r
+        except requests.RequestException as e:
             if attempt == max_retries - 1:
                 logger.error(f"Request error {e} for URL {url}")
             else:
@@ -73,7 +61,7 @@ def whatcms(victim, logger):
                     'msg': whatcms_response.get('msg', 'No message'),
                     'request_web': data.get('request', 'No request data'),
                     'api_url': url,
-                    'scan_date': time.strftime('%Y-%m-%d %H:%M')
+                    'scan_date': scan_timestamp()
                 }
                 logger.info(f"✓ CMS detected: {whatcms_details['name']}")
                 break
@@ -98,22 +86,11 @@ def whatcms(victim, logger):
             'msg': 'No CMS detected',
             'request_web': 'No request data',
             'api_url': 'None',
-            'scan_date': time.strftime('%Y-%m-%d %H:%M')
+            'scan_date': scan_timestamp()
         }
     
-    # Save results to file
-    try:
-        directory = os.path.join(result, victim)
-        os.makedirs(directory, exist_ok=True)
-        file_path = os.path.join(directory, "whatcms.json")
-        
-        with open(file_path, "w") as file:
-            json.dump(whatcms_details, file, indent=4, ensure_ascii=False)
-        
-        logger.info(f"WhatCMS results saved to: {file_path}")
-    except Exception as e:
-        logger.error(f"Failed to save WhatCMS results: {e}")
-    
+    save_json_result(victim, "whatcms.json", whatcms_details, logger, "WhatCMS results")
+
     # Display results in a readable format
     logger.info(f"\n--- CMS Detection Results for {victim} ---")
     logger.info(f"Status Code: {whatcms_details['code']}")
@@ -122,8 +99,22 @@ def whatcms(victim, logger):
     logger.info(f"CMS Version: {whatcms_details['version']}")
     logger.info(f"CMS Confidence: {whatcms_details['confidence']}")
     logger.info(f"CMS URL: {whatcms_details['cms_url']}")
-    
+
     return whatcms_details
+
+
+def run(victim, logger):
+    """Entry point: WhatCMS, Wappalyzer stack detection, and WAF fingerprinting."""
+    details = whatcms(victim, logger)
+    victim_url = f"https://{victim}"
+    run_safe_steps(
+        logger,
+        [
+            ("Wappalyzer technology detection", find_techs, (victim_url, logger)),
+            ("WAF detection", wafDetector, (victim, victim_url, logger)),
+        ],
+    )
+    return details
 
 def Get_Wappalyzer_Credit(logger):
     """Enhanced Wappalyzer credit check with better error handling"""
@@ -234,26 +225,14 @@ def find_techs(victim_url, logger):
         logger.warning("No technologies detected")
         return None
     
-    # Save results to file
-    try:
-        directory = os.path.join(result, victim_url)
-        os.makedirs(directory, exist_ok=True)
-        
-        tech_results = {
-            'target': victim_url,
-            'scan_date': time.strftime('%Y-%m-%d %H:%M'),
-            'total_technologies': len(TechVersionList),
-            'technologies': TechVersionList
-        }
-        
-        file_path = os.path.join(directory, "wappalyzer_technologies.json")
-        with open(file_path, "w") as f:
-            json.dump(tech_results, f, indent=4, ensure_ascii=False)
-        
-        logger.info(f"Technology detection results saved to: {file_path}")
-    except Exception as e:
-        logger.error(f"Failed to save technology detection results: {e}")
-    
+    host = urlparse(victim_url).netloc or victim_url.replace("https://", "").replace("http://", "").split("/")[0]
+    tech_results = {
+        **base_scan_meta(victim_url),
+        'total_technologies': len(TechVersionList),
+        'technologies': TechVersionList,
+    }
+    save_json_result(host, "wappalyzer_technologies.json", tech_results, logger, "Wappalyzer technologies")
+
     # Display results
     logger.info(f"\n--- Technology Detection Results for {victim_url} ---")
     logger.info(f"Total technologies detected: {len(TechVersionList)}")
@@ -322,10 +301,9 @@ def wafDetector(victim, victim_url, logger):
 
     # Analyze response for WAF signatures
     waf_results = {
-        'target': victim,
+        **base_scan_meta(victim),
         'test_url': test_url,
         'response_code': result.status_code,
-        'scan_date': time.strftime('%Y-%m-%d %H:%M'),
         'waf_detected': False,
         'waf_name': None,
         'confidence_score': 0,
@@ -358,19 +336,8 @@ def wafDetector(victim, victim_url, logger):
     else:
         logger.info(f"Response code {result.status_code} - no WAF blocking detected")
     
-    # Save results to file
-    try:
-        directory = os.path.join(result, victim)
-        os.makedirs(directory, exist_ok=True)
-        
-        file_path = os.path.join(directory, "waf_detection.json")
-        with open(file_path, "w") as f:
-            json.dump(waf_results, f, indent=4, ensure_ascii=False)
-        
-        logger.info(f"WAF detection results saved to: {file_path}")
-    except Exception as e:
-        logger.error(f"Failed to save WAF detection results: {e}")
-    
+    save_json_result(victim, "waf_detection.json", waf_results, logger, "WAF detection results")
+
     # Display results
     logger.info(f"\n--- WAF Detection Results for {victim} ---")
     if waf_results['waf_detected']:

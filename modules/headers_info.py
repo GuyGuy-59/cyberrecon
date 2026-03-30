@@ -4,6 +4,7 @@ import os
 import time
 import logging
 from .config import *
+from .common_utils import base_scan_meta_long, save_json_result
 from collections import OrderedDict
 from bs4 import BeautifulSoup
 
@@ -19,10 +20,10 @@ def fetch_soup(victim_url, headers, max_retries=3):
             )
             response.raise_for_status()
             return BeautifulSoup(response.text, "html.parser")
-        except requests.RequestException as e:
+        except requests.RequestException:
             if attempt == max_retries - 1:
-                raise e
-            time.sleep(2 ** attempt)  # Exponential backoff
+                raise
+            time.sleep(2 ** attempt)
     return None
 
 def parse_table_data(soup, title):
@@ -46,32 +47,25 @@ def parse_table_data(soup, title):
     except (AttributeError, IndexError) as e:
         return []
 
+def _table_cell_after_label(soup, label_text):
+    try:
+        th = soup.find("th", class_="tableLabel", text=label_text)
+        return th.find_next_sibling("td").text.strip() if th else "Unknown"
+    except (AttributeError, IndexError):
+        return "Unknown"
+
+
 def extract_data(soup):
-    """Enhanced data extraction with better error handling"""
-    data = {}
-    
     try:
-        # Extract IP address
-        ip_elem = soup.find("th", class_="tableLabel", text="IP Address:")
-        data["ip"] = ip_elem.find_next_sibling("td").text.strip() if ip_elem else "Unknown"
-    except (AttributeError, IndexError):
-        data["ip"] = "Unknown"
-    
-    try:
-        # Extract site
-        site_elem = soup.find("th", class_="tableLabel", text="Site:")
-        data["site"] = site_elem.find_next_sibling("td").text.strip() if site_elem else "Unknown"
-    except (AttributeError, IndexError):
-        data["site"] = "Unknown"
-    
-    try:
-        # Extract score
         score_elem = soup.find("div", class_="score")
-        data["score"] = score_elem.text.strip() if score_elem else "Unknown"
+        score = score_elem.text.strip() if score_elem else "Unknown"
     except (AttributeError, IndexError):
-        data["score"] = "Unknown"
-    
-    return data
+        score = "Unknown"
+    return {
+        "ip": _table_cell_after_label(soup, "IP Address:"),
+        "site": _table_cell_after_label(soup, "Site:"),
+        "score": score,
+    }
 
 def parse_headers(soup):
     """Enhanced header parsing with better error handling"""
@@ -127,7 +121,7 @@ def requests_analyze_headers(victim, logger):
                 data = extract_data(soup)
                 data["headers"] = parse_headers(soup)
                 data["analysis_url"] = url
-                data["timestamp"] = time.strftime('%Y-%m-%d %H:%M:%S')
+                data.update(base_scan_meta_long(victim))
                 return data
             else:
                 logger.warning(f"Analysis failed for URL: {url}")
@@ -138,12 +132,12 @@ def requests_analyze_headers(victim, logger):
     
     # Return empty data if all attempts failed
     return {
+        **base_scan_meta_long(victim),
         "ip": "Unknown",
         "site": victim,
         "score": "Unknown",
         "headers": {},
         "error": "All analysis attempts failed",
-        "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')
     }
 
 def analyze_headers(victim, logger):
@@ -152,19 +146,15 @@ def analyze_headers(victim, logger):
     
     data = requests_analyze_headers(victim, logger)
     
-    # Save results to file
-    try:
-        results_dir = os.path.join(result, victim)
-        os.makedirs(results_dir, exist_ok=True)
-        
-        filename = os.path.join(results_dir, "security_headers_analysis.json")
-        with open(filename, 'w') as f:
-            json.dump(data, f, indent=4, sort_keys=True)
-        
-        logger.info(f"Security headers analysis saved to: {filename}")
-    except Exception as e:
-        logger.error(f"Failed to save results: {e}")
-    
+    save_json_result(
+        victim,
+        "security_headers_analysis.json",
+        data,
+        logger,
+        "Security headers analysis",
+        sort_keys=True,
+    )
+
     # Log results in a more readable format
     logger.info(f"\n--- Security Headers Analysis for {victim} ---")
     logger.info(f"IP Address: {data.get('ip', 'Unknown')}")
@@ -360,8 +350,7 @@ def process_observatory_results(target, results, logger):
         
         # Create structured results
         observatory_data = {
-            'target': target,
-            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
+            **base_scan_meta_long(target),
             'scan_info': {
                 'score': score,
                 'grade': grade,
@@ -468,8 +457,7 @@ def analyze_security_headers_comprehensive(victim, logger):
     
     # Initialize combined results
     combined_results = {
-        'target': victim,
-        'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
+        **base_scan_meta_long(victim),
         'security_headers': None,
         'http_observatory': None,
         'combined_score': None,
@@ -484,7 +472,7 @@ def analyze_security_headers_comprehensive(victim, logger):
     # 1. Run Security Headers analysis
     logger.info("Running Security Headers analysis...")
     try:
-        security_headers_data = requests_analyze_headers(victim, logger)
+        security_headers_data = analyze_headers(victim, logger)
         if security_headers_data and 'error' not in security_headers_data:
             combined_results['security_headers'] = security_headers_data
             combined_results['summary']['security_headers_available'] = True
@@ -625,25 +613,15 @@ def generate_comprehensive_recommendations(results):
     return list(set(recommendations))
 
 def save_comprehensive_results(victim, results, logger):
-    """
-    Save comprehensive security analysis results
-    
-    Args:
-        victim (str): Target domain
-        results (dict): Combined results
-        logger: Logger instance
-    """
-    try:
-        results_dir = os.path.join(result, victim)
-        os.makedirs(results_dir, exist_ok=True)
-        
-        filename = os.path.join(results_dir, "comprehensive_security_analysis.json")
-        with open(filename, 'w', encoding='utf-8') as f:
-            json.dump(results, f, indent=4, sort_keys=True, ensure_ascii=False)
-        
-        logger.info(f"Comprehensive security analysis saved to: {filename}")
-    except Exception as e:
-        logger.error(f"Failed to save comprehensive results: {e}")
+    """Save comprehensive security analysis results."""
+    save_json_result(
+        victim,
+        "comprehensive_security_analysis.json",
+        results,
+        logger,
+        "Comprehensive security analysis",
+        sort_keys=True,
+    )
 
 def display_comprehensive_summary(victim, results, logger):
     """
@@ -694,3 +672,8 @@ def display_comprehensive_summary(victim, results, logger):
     
     logger.info(f"{'='*60}")
     logger.info("✓ Comprehensive security analysis completed")
+
+
+def run(victim, logger):
+    """Entry point: security headers + Mozilla HTTP Observatory analysis."""
+    return analyze_security_headers_comprehensive(victim, logger)

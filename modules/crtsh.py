@@ -1,9 +1,9 @@
 import requests
 import json
 import socket
-import os
 import time
 from .config import *
+from .common_utils import base_scan_meta, save_json_result
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import defaultdict
 
@@ -15,25 +15,17 @@ def parse_jsondata(jsondata, target_domain):
         return subdomains
     
     for entry in jsondata:
-        try:
-            name_value = entry.get('name_value', '')
-            if not name_value:
-                continue
-                
-            for name in name_value.split('\n'):
-                name = name.strip()
-                if not name or name == target_domain:
-                    continue
-                    
-                # Filter out invalid subdomains
-                if '.' not in name or len(name) < 3:
-                    continue
-                    
-                subdomain_type = 'wildcard' if '*' in name else 'regular'
-                subdomains[subdomain_type].add(name)
-        except (KeyError, AttributeError) as e:
+        if not isinstance(entry, dict):
             continue
-    
+        name_value = entry.get('name_value') or ''
+        for name in name_value.split('\n'):
+            name = name.strip()
+            if not name or name == target_domain:
+                continue
+            if '.' not in name or len(name) < 3:
+                continue
+            key = 'wildcard' if '*' in name else 'regular'
+            subdomains[key].add(name)
     return subdomains
 
 def request_crtsh(domain, logger, max_retries=3):
@@ -51,7 +43,7 @@ def request_crtsh(domain, logger, max_retries=3):
             )
             response.raise_for_status()
             
-            data = json.loads(response.content.decode('UTF-8'))
+            data = response.json()
             logger.info(f"✓ Retrieved {len(data)} certificates for {domain}")
             return data
             
@@ -86,30 +78,22 @@ def process_domain(domain, logger):
 
 def save_subdomain_results(victim, subdomains, subdomain_ips, logger):
     """Save subdomain results to file"""
-    try:
-        results_dir = os.path.join(result, victim)
-        os.makedirs(results_dir, exist_ok=True)
-        
-        # Prepare results data
-        results_data = {
-            'target': victim,
-            'scan_date': time.strftime('%Y-%m-%d %H:%M'),
-            'total_regular_subdomains': len(subdomains['regular']),
-            'total_wildcard_subdomains': len(subdomains['wildcard']),
-            'regular_subdomains': list(subdomains['regular']),
-            'wildcard_subdomains': list(subdomains['wildcard']),
-            'subdomain_ips': subdomain_ips
-        }
-        
-        # Save detailed results
-        filename = os.path.join(results_dir, "crtsh_subdomains.json")
-        with open(filename, 'w') as f:
-            json.dump(results_data, f, indent=2, ensure_ascii=False)
-        
-        logger.info(f"Subdomain results saved to: {filename}")
-        
-    except Exception as e:
-        logger.error(f"Failed to save subdomain results: {e}")
+    results_data = {
+        **base_scan_meta(victim),
+        'total_regular_subdomains': len(subdomains['regular']),
+        'total_wildcard_subdomains': len(subdomains['wildcard']),
+        'regular_subdomains': list(subdomains['regular']),
+        'wildcard_subdomains': list(subdomains['wildcard']),
+        'subdomain_ips': subdomain_ips,
+    }
+    save_json_result(
+        victim,
+        "crtsh_subdomains.json",
+        results_data,
+        logger,
+        "crt.sh subdomain results",
+        indent=2,
+    )
 
 def crtsh(victim, logger):
     """Enhanced crt.sh subdomain enumeration with better error handling and progress tracking"""
@@ -179,14 +163,19 @@ def crtsh(victim, logger):
         # Show some examples
         if subdomains['regular']:
             logger.info("\nSample regular subdomains:")
-            for subdomain in sorted(list(subdomains['regular'])[:10]):
+            for subdomain in sorted(subdomains['regular'])[:10]:
                 ip = subdomain_ips.get(subdomain, "IP not found")
                 logger.info(f"  - {subdomain}: {ip}")
         
         if subdomains['wildcard']:
             logger.info("\nSample wildcard subdomains:")
-            for subdomain in sorted(list(subdomains['wildcard'])[:5]):
+            for subdomain in sorted(subdomains['wildcard'])[:5]:
                 logger.info(f"  - {subdomain}")
         
     except Exception as e:
         logger.error(f"Error in crt.sh enumeration: {e}")
+
+
+def run(victim, logger):
+    """Entry point: certificate transparency subdomain enumeration."""
+    return crtsh(victim, logger)

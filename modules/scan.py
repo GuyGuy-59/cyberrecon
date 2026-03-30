@@ -4,22 +4,14 @@ import json
 import time
 import logging
 from .config import *
+from .common_utils import (
+    SKIP_RESOLUTION_FAILED,
+    base_scan_meta_long,
+    resolve_host_to_ip,
+    result_path,
+    save_json_file,
+)
 
-def ensure_directory_exists(directory):
-    """Create directory if it doesn't exist with proper error handling"""
-    try:
-        os.makedirs(directory, exist_ok=True)
-    except OSError as e:
-        logging.error(f"Error creating directory {directory}: {e.strerror}")
-
-def write_json_to_file(directory, filename, data):
-    """Write data to JSON file with error handling"""
-    try:
-        filepath = os.path.join(directory, filename)
-        with open(filepath, "w") as file:
-            json.dump(data, file, indent=4)
-    except Exception as e:
-        logging.error(f"Error writing to {filename}: {e}")
 
 def read_json_from_file(directory, filename):
     """Read data from JSON file with error handling"""
@@ -31,11 +23,18 @@ def read_json_from_file(directory, filename):
         logging.error(f"Error reading from {filename}: {e}")
         return None
 
+
+def _write_json_and_verify(directory, filename, data, logger):
+    """Write JSON then read back to confirm persistence."""
+    filepath = os.path.join(directory, filename)
+    save_json_file(filepath, data, logger, description=filename)
+    if read_json_from_file(directory, filename) is None:
+        logger.warning(f"Could not read back scan file {filename} for verification")
+
+
 def perform_scan(scan_type, victim, victim_ip, nmap_instance, logger):
     """Perform nmap scan with enhanced error handling and progress tracking"""
-    directory = os.path.join(result, victim, f"scan_{victim_ip}")
-    ensure_directory_exists(directory)
-    
+    directory = result_path(victim, f"scan_{victim_ip}")
     logger.info(f"\n-- {scan_type} Scan for {victim_ip} --\n")
     
     try:
@@ -45,19 +44,16 @@ def perform_scan(scan_type, victim, victim_ip, nmap_instance, logger):
         
         logger.info(f"Scan completed in {scan_duration:.2f} seconds")
         
-        # Save results
         filename = f"{scan_type}Scan_{victim_ip}.json"
-        write_json_to_file(directory, filename, results)
-        
-        # Also save a summary
+        _write_json_and_verify(directory, filename, results, logger)
+
         summary = {
+            **base_scan_meta_long(victim_ip),
             "scan_type": scan_type,
-            "target": victim_ip,
             "scan_duration": scan_duration,
-            "timestamp": time.strftime('%Y-%m-%d %H:%M:%S'),
-            "results": results
+            "results": results,
         }
-        write_json_to_file(directory, f"{scan_type}Summary_{victim_ip}.json", summary)
+        _write_json_and_verify(directory, f"{scan_type}Summary_{victim_ip}.json", summary, logger)
         
         return results
         
@@ -85,13 +81,10 @@ def log_scan_results(data, victim_ip, logger):
             "State": port_info.get('state', 'Unknown')
         }
         
-        service = port_info.get('service', {})
+        service = port_info.get('service') or {}
         if service:
-            service_info = {}
-            for key in ['name', 'product', 'version', 'extrainfo']:
-                if key in service and service[key]:
-                    service_info[key] = service[key]
-            results_json['service'] = service_info
+            keys = ('name', 'product', 'version', 'extrainfo')
+            results_json['service'] = {k: service[k] for k in keys if service.get(k)}
         
         # Log in a more readable format
         port_str = f"Port {results_json['Port']}/{results_json['Protocol']} - {results_json['State']}"
@@ -134,3 +127,11 @@ def scan_victim(victim, victim_ip, logger):
             
     except Exception as e:
         logger.error(f"Error during victim scan: {e}")
+
+
+def run(victim, logger):
+    """Entry point: resolve host to IPv4 then run ping + full nmap scans."""
+    target_ip = resolve_host_to_ip(victim, logger)
+    if not target_ip:
+        return SKIP_RESOLUTION_FAILED
+    scan_victim(victim, target_ip, logger)

@@ -1,10 +1,13 @@
 import dns.resolver
 import requests
-import json
-import os
 import time
 from .config import *
-
+from .common_utils import (
+    SKIP_RESOLUTION_FAILED,
+    base_scan_meta,
+    resolve_host_to_ip,
+    save_json_result,
+)
 def perform_request(url, logger, timeout=10, max_retries=3):
     """Enhanced request function with retry mechanism and better error handling"""
     for attempt in range(max_retries):
@@ -77,6 +80,8 @@ def iplocator(victim_ip, logger):
                 logger.info(f"{key}: {value}")
     else:
         logger.error("All IP location services failed")
+
+    if not results:
         return False
 
 def parse_ipinfo_response(data):
@@ -108,21 +113,14 @@ def parse_ipapi_response(data):
 
 def save_ip_results(victim_ip, results, logger):
     """Save IP lookup results to file"""
-    try:
-        results_dir = os.path.join(result, victim_ip)
-        os.makedirs(results_dir, exist_ok=True)
-        
-        filename = os.path.join(results_dir, "ip_location_results.json")
-        with open(filename, 'w') as f:
-            json.dump({
-                'target_ip': victim_ip,
-                'scan_date': time.strftime('%Y-%m-%d %H:%M'),
-                'results': results
-            }, f, indent=2)
-        
-        logger.info(f"IP location results saved to: {filename}")
-    except Exception as e:
-        logger.error(f"Failed to save IP results: {e}")
+    save_json_result(
+        victim_ip,
+        "ip_location_results.json",
+        {**base_scan_meta(victim_ip), "results": results},
+        logger,
+        "IP location results",
+        indent=2,
+    )
 
 def revert_ip(victim_ip):
     """Reverse IP address for DNS lookups"""
@@ -165,3 +163,11 @@ def spamcop_test(victim_ip, logger):
         logger.error(f"Unexpected error during SpamCop check: {e}")
         return None
 
+
+def run(victim, logger):
+    """Entry point: geolocation, SpamCop, and related IP intelligence."""
+    target_ip = resolve_host_to_ip(victim, logger)
+    if not target_ip:
+        return SKIP_RESOLUTION_FAILED
+    iplocator(target_ip, logger)
+    spamcop_test(target_ip, logger)

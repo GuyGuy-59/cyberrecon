@@ -1,10 +1,15 @@
-from .config import *
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 import requests
 import json
-import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from .config import *
+from .common_utils import (
+    SKIP_RESOLUTION_FAILED,
+    base_scan_meta,
+    resolve_host_to_ip,
+    save_json_result,
+)
 def make_api_request(url, headers=None, auth=None, timeout=30, max_retries=3):
     """Enhanced API request function with retry mechanism and better error handling"""
     for attempt in range(max_retries):
@@ -18,24 +23,12 @@ def make_api_request(url, headers=None, auth=None, timeout=30, max_retries=3):
             )
             response.raise_for_status()
             return response
-        except requests.RequestException as e:
+        except requests.RequestException:
             if attempt == max_retries - 1:
-                raise e
-            time.sleep(2 ** attempt)  # Exponential backoff
+                raise
+            time.sleep(2 ** attempt)
     return None
 
-def save_json_response(file_path, data, logger):
-    """Enhanced JSON saving with better error handling and directory creation"""
-    try:
-        # Ensure directory exists
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
-        
-        with open(file_path, "w", encoding='utf-8') as f:
-            json.dump(data, f, indent=4, ensure_ascii=False)
-        
-        logger.info(f"Data saved to: {file_path}")
-    except Exception as e:
-        logger.error(f"Failed to save data to {file_path}: {e}")
 
 def handle_error(error_type, status_code, response_text=None, logger=None):
     """Enhanced error handling with better logging"""
@@ -88,10 +81,13 @@ def device_shodan(victim, victim_ip, logger):
                 data = response.json()
                 results[key] = data
                 
-                # Save individual results
-                filename = f"shodan_{key}.json"
-                file_path = os.path.join(result, victim, filename)
-                save_json_response(file_path, data, logger)
+                save_json_result(
+                    victim,
+                    f"shodan_{key}.json",
+                    data,
+                    logger,
+                    f"Shodan {key}",
+                )
                 
                 logger.info(f"✓ Shodan {endpoint_info['description']} lookup successful")
                 return True
@@ -118,16 +114,15 @@ def device_shodan(victim, victim_ip, logger):
             except Exception as e:
                 logger.error(f"Error processing Shodan {key}: {e}")
     
-    # Save combined results
     if results:
-        combined_file = os.path.join(result, victim, "shodan_combined.json")
-        save_json_response(combined_file, {
-            'target': victim,
-            'target_ip': victim_ip,
-            'scan_date': time.strftime('%Y-%m-%d %H:%M'),
-            'results': results
-        }, logger)
-    
+        save_json_result(
+            victim,
+            "shodan_combined.json",
+            {**base_scan_meta(victim), "target_ip": victim_ip, "results": results},
+            logger,
+            "Shodan combined",
+        )
+
     return results
 
 def urlscanio(victim, logger):
@@ -143,13 +138,17 @@ def urlscanio(victim, logger):
             results = [dict(item) for item in data.get('results', [])]
             
             if results:
-                file_path = os.path.join(result, victim, "urlscan.json")
-                save_json_response(file_path, {
-                    'target': victim,
-                    'scan_date': time.strftime('%Y-%m-%d %H:%M'),
-                    'total_results': len(results),
-                    'results': results
-                }, logger)
+                save_json_result(
+                    victim,
+                    "urlscan.json",
+                    {
+                        **base_scan_meta(victim),
+                        "total_results": len(results),
+                        "results": results,
+                    },
+                    logger,
+                    "urlscan.io results",
+                )
                 
                 logger.info(f"✓ Found {len(results)} urlscan.io results for {victim}")
                 
@@ -181,13 +180,17 @@ def device_censys(victim, logger):
         if response and response.status_code == 200:
             data = response.json()
             
-            file_path = os.path.join(result, victim, "censys_hosts.json")
-            save_json_response(file_path, {
-                'target': victim,
-                'scan_date': time.strftime('%Y-%m-%d %H:%M'),
-                'total_results': data.get('result', {}).get('total', 0),
-                'results': data
-            }, logger)
+            save_json_result(
+                victim,
+                "censys_hosts.json",
+                {
+                    **base_scan_meta(victim),
+                    "total_results": data.get("result", {}).get("total", 0),
+                    "results": data,
+                },
+                logger,
+                "Censys hosts",
+            )
             
             total_results = data.get('result', {}).get('total', 0)
             logger.info(f"✓ Found {total_results} Censys results for {victim}")
@@ -206,3 +209,13 @@ def device_censys(victim, logger):
             
     except Exception as e:
         logger.error(f"Error in Censys lookup: {e}")
+
+
+def run(victim, logger):
+    """Entry point: Shodan, urlscan.io, and Censys (requires resolvable IPv4 for Shodan host)."""
+    target_ip = resolve_host_to_ip(victim, logger)
+    if not target_ip:
+        return SKIP_RESOLUTION_FAILED
+    device_shodan(victim, target_ip, logger)
+    urlscanio(victim, logger)
+    device_censys(victim, logger)
