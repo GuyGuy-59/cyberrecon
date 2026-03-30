@@ -2,6 +2,7 @@ import requests
 import json
 import os
 import time
+from urllib.parse import quote
 from .config import *
 
 def parsejson(json_obj, p):
@@ -98,6 +99,67 @@ def request_proxynova(info_user, logger):
     
     return proxynova_results
 
+def request_haveibeenpwned(info_user, logger):
+    """Check Have I Been Pwned API for breached account data."""
+    logger.info(f"Checking Have I Been Pwned for: {info_user}")
+
+    hibp_results = {
+        'target': info_user,
+        'scan_date': time.strftime('%Y-%m-%d %H:%M'),
+        'breach_found': False,
+        'breaches': [],
+        'skipped': False,
+        'error': None
+    }
+
+    api_key = globals().get('hibp_api_key', '')
+    if not api_key:
+        logger.info("HIBP API key not configured, skipping Have I Been Pwned check")
+        hibp_results['skipped'] = True
+        hibp_results['error'] = "HIBP API key missing"
+        return hibp_results
+
+    try:
+        # HIBP API expects the account to be URL encoded in the path.
+        encoded_account = quote(info_user, safe='')
+        url = f"https://haveibeenpwned.com/api/v3/breachedaccount/{encoded_account}"
+        headers = {
+            "hibp-api-key": api_key,
+            "user-agent": "CyberRecon/1.0",
+            "accept": "application/json"
+        }
+        params = {"truncateResponse": "false"}
+
+        response = requests.get(url, headers=headers, params=params, timeout=30)
+
+        if response.status_code == 404:
+            logger.info(f"✓ No HIBP breaches found for {info_user}")
+            return hibp_results
+
+        response.raise_for_status()
+        breaches = response.json() if response.content else []
+
+        if breaches:
+            hibp_results['breach_found'] = True
+            hibp_results['breaches'] = breaches
+            logger.warning(f"⚠️  HIBP breach found for {info_user}: {len(breaches)} breach(es)")
+            for breach in breaches[:5]:
+                logger.warning(f"  - {breach.get('Name', 'Unknown')}: {breach.get('BreachDate', 'Unknown date')}")
+        else:
+            logger.info(f"✓ No HIBP breaches found for {info_user}")
+
+    except requests.RequestException as e:
+        logger.error(f"Error checking Have I Been Pwned: {e}")
+        hibp_results['error'] = str(e)
+    except ValueError as e:
+        logger.error(f"Invalid JSON from Have I Been Pwned: {e}")
+        hibp_results['error'] = str(e)
+    except Exception as e:
+        logger.error(f"Unexpected error in Have I Been Pwned check: {e}")
+        hibp_results['error'] = str(e)
+
+    return hibp_results
+
 def get_email(victim, logger):
     """Enhanced email enumeration with comprehensive error handling and structured output"""
     logger.info(f"Starting email enumeration for: {victim}")
@@ -108,6 +170,7 @@ def get_email(victim, logger):
         'emails_found': [],
         'total_emails': 0,
         'breach_checks': {},
+        'hibp_checks': {},
         'proxynova_checks': {},
         'hunter_io_success': False,
         'errors': []
@@ -149,9 +212,9 @@ def get_email(victim, logger):
                     breach_result = requests_breachdirectory(email, logger)
                     email_results['breach_checks'][email] = breach_result
                     
-                    # Check each email with Proxynova
-                    proxynova_result = request_proxynova(email, logger)
-                    email_results['proxynova_checks'][email] = proxynova_result
+                    # Check each email with Have I Been Pwned
+                    hibp_result = request_haveibeenpwned(email, logger)
+                    email_results['hibp_checks'][email] = hibp_result
         else:
             error_msg = json_response.get('errors', [{}])[0].get('details', 'Unknown error')
             logger.warning(f"Hunter.io returned no emails: {error_msg}")
@@ -199,5 +262,18 @@ def get_email(victim, logger):
         logger.warning(f"⚠️  {len(breached_emails)} emails found in breach databases")
     else:
         logger.info("✓ No emails found in breach databases")
+
+    # Show Have I Been Pwned summary
+    hibp_breached_emails = [email for email, result in email_results['hibp_checks'].items()
+                            if result.get('breach_found', False)]
+    hibp_skipped_count = sum(1 for result in email_results['hibp_checks'].values()
+                             if result.get('skipped', False))
+
+    if hibp_breached_emails:
+        logger.warning(f"⚠️  {len(hibp_breached_emails)} emails found in Have I Been Pwned")
+    elif hibp_skipped_count == len(email_results['hibp_checks']) and hibp_skipped_count > 0:
+        logger.info("Have I Been Pwned checks skipped (HIBP API key not configured)")
+    else:
+        logger.info("✓ No emails found in Have I Been Pwned")
     
     return email_results

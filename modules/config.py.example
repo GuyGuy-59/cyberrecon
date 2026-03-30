@@ -21,6 +21,10 @@ wappalyzer_api_key = "your_wappalyzer_key_here"
 # Get your free key at: https://breachdirectory.tk/
 breachdirectory_api_key = "your_breachdirectory_key_here"
 
+# Have I Been Pwned API Key (Optional for breach verification)
+# Get your key at: https://haveibeenpwned.com/API/Key
+hibp_api_key = ""
+
 # =============================================================================
 # API KEYS - OPTIONAL (Enhanced functionality)
 # =============================================================================
