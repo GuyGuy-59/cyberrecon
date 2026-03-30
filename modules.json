@@ -1,0 +1,125 @@
+{
+  "modules": {
+    "dorking": {
+      "display_name": "Google Dorking",
+      "package": "modules.dorking",
+      "function": "scan_dorks"
+    },
+    "browse": {
+      "display_name": "URL Exploration",
+      "package": "modules.browseUrl",
+      "function": "scan_robots"
+    },
+    "scan": {
+      "display_name": "Port Scanning",
+      "package": "modules.scan",
+      "function": "scan_victim"
+    },
+    "ip": {
+      "display_name": "IP Analysis",
+      "package": "modules.ip_tools",
+      "function": "iplocator"
+    },
+    "headers": {
+      "display_name": "Security Headers",
+      "package": "modules.headers_info",
+      "function": "analyze_security_headers_comprehensive"
+    },
+    "iot": {
+      "display_name": "IoT Search",
+      "package": "modules.IoT",
+      "function": "device_shodan"
+    },
+    "crtsh": {
+      "display_name": "Subdomain Enumeration",
+      "package": "modules.crtsh",
+      "function": "crtsh"
+    },
+    "ssl": {
+      "display_name": "SSL Analysis",
+      "package": "modules.ssl_info",
+      "function": "analyze_Transport_Layer_Security"
+    },
+    "site": {
+      "display_name": "Site Analysis",
+      "package": "modules.site_analysis",
+      "function": "whatcms"
+    },
+    "dns": {
+      "display_name": "DNS Analysis",
+      "package": "modules.dns_info",
+      "function": "req_dns_types"
+    },
+    "email": {
+      "display_name": "Email Enumeration",
+      "package": "modules.email_search",
+      "function": "get_email"
+    }
+  },
+  "categories": [
+    {
+      "name": "DISCOVERY",
+      "items": [
+        {
+          "id": "dorking",
+          "description": "Run Google dorking queries against the target domain."
+        },
+        {
+          "id": "browse",
+          "description": "Explore robots.txt and linked URLs from the target."
+        },
+        {
+          "id": "crtsh",
+          "description": "Enumerate subdomains via certificate transparency (crt.sh)."
+        },
+        {
+          "id": "site",
+          "description": "Detect CMS, stack, and site metadata (WhatCMS-style)."
+        }
+      ]
+    },
+    {
+      "name": "NETWORK",
+      "items": [
+        {
+          "id": "scan",
+          "description": "TCP port scan on the host resolved from the target."
+        },
+        {
+          "id": "ip",
+          "description": "IP geolocation, ASN, and network intelligence."
+        },
+        {
+          "id": "dns",
+          "description": "DNS records and resolution for the target."
+        },
+        {
+          "id": "iot",
+          "description": "Search Shodan for exposed services and IoT data."
+        }
+      ]
+    },
+    {
+      "name": "WEB_SECURITY",
+      "items": [
+        {
+          "id": "headers",
+          "description": "Analyze HTTP security headers on the target."
+        },
+        {
+          "id": "ssl",
+          "description": "TLS certificate chain, ciphers, and SSL/TLS configuration."
+        }
+      ]
+    },
+    {
+      "name": "EMAIL",
+      "items": [
+        {
+          "id": "email",
+          "description": "Enumerate and collect email addresses for the domain."
+        }
+      ]
+    }
+  ]
+}

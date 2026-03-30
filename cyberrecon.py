@@ -6,13 +6,28 @@ Automated OSINT tool for comprehensive security analysis
 
 import sys
 import os
+import json
 import argparse
 import logging
 import socket
 from modules.config import *
 
+_MODULES_MANIFEST_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "modules.json")
+_MODULES_MANIFEST_CACHE = None
+
+
+def _load_modules_manifest():
+    """Load and cache modules.json (definitions + list-modules categories)."""
+    global _MODULES_MANIFEST_CACHE
+    if _MODULES_MANIFEST_CACHE is None:
+        with open(_MODULES_MANIFEST_PATH, encoding="utf-8") as f:
+            _MODULES_MANIFEST_CACHE = json.load(f)
+    return _MODULES_MANIFEST_CACHE
+
 def setup_logging(target=None):
     """Setup logging configuration"""
+    os.makedirs(result, exist_ok=True)
+
     # Create formatter
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
     
@@ -64,20 +79,55 @@ def run_configuration_check():
         return response in ['y', 'yes']
 
 def get_available_modules():
-    """Get list of available modules"""
-    return {
-        "dorking": ("Google Dorking", "modules.dorking", "scan_dorks"),
-        "browse": ("URL Exploration", "modules.browseUrl", "scan_robots"),
-        "scan": ("Port Scanning", "modules.scan", "scan_victim"),
-        "ip": ("IP Analysis", "modules.ip_tools", "iplocator"),
-        "headers": ("Security Headers", "modules.headers_info", "analyze_security_headers_comprehensive"),
-        "iot": ("IoT Search", "modules.IoT", "device_shodan"),
-        "crtsh": ("Subdomain Enumeration", "modules.crtsh", "crtsh"),
-        "ssl": ("SSL Analysis", "modules.ssl_info", "analyze_Transport_Layer_Security"),
-        "site": ("Site Analysis", "modules.site_analysis", "whatcms"),
-        "dns": ("DNS Analysis", "modules.dns_info", "req_dns_types"),
-        "email": ("Email Enumeration", "modules.email_search", "get_email")
-    }
+    """Get list of available modules from modules.json."""
+    data = _load_modules_manifest()
+    out = {}
+    for key, spec in data["modules"].items():
+        out[key] = (spec["display_name"], spec["package"], spec["function"])
+    return out
+
+
+def get_module_list_categories():
+    """
+    Categories and one-line descriptions for --list-modules.
+    Order matches logical grouping; every key from get_available_modules() must appear once.
+    """
+    data = _load_modules_manifest()
+    result = []
+    for cat in data["categories"]:
+        items = [(item["id"], item["description"]) for item in cat["items"]]
+        result.append((cat["name"], items))
+    return result
+
+
+def print_modules_list():
+    """Print modules grouped by category: category title, then [*] name + description."""
+    available = get_available_modules()
+    categories = get_module_list_categories()
+
+    listed = []
+    for _, items in categories:
+        listed.extend(k for k, _ in items)
+
+    missing = set(available.keys()) - set(listed)
+    extra = set(listed) - set(available.keys())
+    if missing or extra:
+        raise RuntimeError(
+            f"modules.json categories out of sync with modules: missing={missing!r} extra={extra!r}"
+        )
+
+    name_width = 0
+    for _, items in categories:
+        for key, _ in items:
+            name_width = max(name_width, len(key))
+    name_width = max(name_width + 2, 26)
+
+    for idx, (cat, items) in enumerate(categories):
+        print(cat)
+        for key, desc in items:
+            print(f"[*] {key:<{name_width}}{desc}")
+        if idx < len(categories) - 1:
+            print()
 
 def run_modules(target, selected_modules, logger):
     """Run selected modules on the target"""
@@ -137,13 +187,13 @@ def run_modules(target, selected_modules, logger):
     return results
 
 def main():
+    module_ids = list(get_available_modules().keys())
     parser = argparse.ArgumentParser(description="CyberRecon OSINT Tool")
     parser.add_argument('target', nargs='?', help='Target domain or IP to analyze')
-    parser.add_argument('--modules', '-m', nargs='+', 
-                       choices=['dorking', 'browse', 'scan', 'ip', 'headers', 'iot', 
-                               'crtsh', 'ssl', 'site', 'dns', 'email'],
+    parser.add_argument('--modules', '-m', nargs='+',
+                       choices=module_ids,
                        help='Specific modules to run (default: all modules)')
-    parser.add_argument('--list-modules', action='store_true',
+    parser.add_argument('--list-modules', '-L', action='store_true',
                        help='List available modules and exit')
     parser.add_argument('--skip-config-check', action='store_true',
                        help='Skip configuration check before running')
@@ -154,10 +204,7 @@ def main():
     
     # List available modules if requested
     if args.list_modules:
-        print("=== Available Modules ===")
-        modules = get_available_modules()
-        for key, (name, _, _) in modules.items():
-            print(f"  {key:12} - {name}")
+        print_modules_list()
         return 0
     
     # Check if target is provided
