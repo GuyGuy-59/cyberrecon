@@ -1,5 +1,5 @@
 import dns.resolver
-import requests
+from . import http_client as requests
 import time
 from .config import *
 from .common_utils import (

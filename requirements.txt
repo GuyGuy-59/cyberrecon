@@ -1,6 +1,7 @@
 dnslib
 dnspython
 requests
+curl_cffi
 python-whois
 python3-nmap
 pyopenssl

@@ -1,6 +1,6 @@
 import ssl
 import socket
-import requests
+from . import http_client as requests
 import time
 import json
 from .config import *

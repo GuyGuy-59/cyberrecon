@@ -1,6 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
-import requests
+from . import http_client as requests
 import json
 
 from .config import *

@@ -1,4 +1,4 @@
-import requests
+from . import http_client as requests
 import json
 from urllib.parse import quote
 from .config import *

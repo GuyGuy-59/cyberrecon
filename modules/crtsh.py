@@ -1,4 +1,4 @@
-import requests
+from . import http_client as requests
 import json
 import socket
 import time

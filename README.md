@@ -9,6 +9,8 @@ CyberRecon is a command-line OSINT (Open Source Intelligence) tool for domain an
 - Pre-scan configuration validation via `modules/config_checker.py`.
 - Logging to `results/` with a per-target log file when a target is set.
 - UTF-8 handling for logs and outputs.
+- HTTP requests go through `modules/http_client.py`, a `requests`-compatible client backed by [curl_cffi](https://github.com/lexiforest/curl_cffi) that impersonates a real browser's TLS handshake (JA3/JA4) instead of Python's stock `ssl`/OpenSSL fingerprint.
+- Google dorking (`dorking` module) resolves each dork through [SerpApi](https://serpapi.com/) when `serpapi_api_key` is configured; otherwise it scrapes Google directly, falling back through DuckDuckGo, Bing, and Startpage when a request is blocked or fails. Bot-check/captcha pages served by any of these engines are detected and treated as a failed lookup rather than a false "0 results".
 
 ## Requirements
 
@@ -41,7 +43,9 @@ Copy the example config and add your API keys:
 cp modules/config.py.example modules/config.py
 ```
 
-Edit `modules/config.py`. Typical keys include Hunter.io, WhatCMS, Wappalyzer, BreachDirectory; Shodan and Censys are optional for IoT-related features. The configuration checker reports missing or invalid keys before a run (unless you skip it).
+Edit `modules/config.py`. Typical keys include Hunter.io, WhatCMS, Wappalyzer, BreachDirectory; Shodan and Censys are optional for IoT-related features. `serpapi_api_key` is optional and used only by the `dorking` module — leave it empty (`""`) to keep the default scraping-based search, or set it to route dorks through [SerpApi](https://serpapi.com/) instead. The configuration checker reports missing or invalid keys before a run (unless you skip it).
+
+`header_default` (User-Agent) and `tls_impersonate` (browser TLS fingerprint used by `modules/http_client.py`, e.g. `"chrome131"`, `"firefox135"`, `"safari184"`) should be kept in sync — a User-Agent claiming one browser while the TLS handshake fingerprints as another is itself a detection signal for fingerprint-correlating WAFs.
 
 ## Usage
 
@@ -75,7 +79,7 @@ python cyberrecon.py example.com -v
 
 | ID | Role |
 |----|------|
-| `dorking` | Google dorking |
+| `dorking` | Google dorking (SerpApi if configured, otherwise Google/DuckDuckGo/Bing/Startpage scraping) |
 | `browse` | robots.txt, `.well-known`, and directory probing (`run` → `scan_robots` and follow-on steps) |
 | `scan` | Port scan (Nmap) |
 | `ip` | IP / geolocation context |
@@ -104,6 +108,7 @@ The main script imports the module and calls `function(target, logger)`. Modules
 
 - **`modules/common_utils.py`**: paths under the configured `result` directory (`result_path`), timestamps (`scan_timestamp` / `scan_timestamp_long`), JSON metadata helpers (`base_scan_meta` / `base_scan_meta_long` with `target` and `scan_date`), and `save_json_result` / `save_json_file`.
 - **`modules/run_utils.py`**: `run_safe` and `run_safe_steps` to run sub-steps without aborting the whole module on a single failure (used in DNS, browse, site analysis, and similar).
+- **`modules/http_client.py`**: `requests`-compatible `get` / `post` / `head` / `Session` / exceptions, backed by `curl_cffi`. Every module imports it as `from . import http_client as requests` instead of importing `requests` directly, so the TLS handshake (JA3/JA4) matches the `tls_impersonate` browser configured in `modules/config.py` for every outbound request.
 
 ## Output
 
@@ -127,6 +132,7 @@ cyberrecon/
 │   ├── config_checker.py
 │   ├── common_utils.py     # Paths, timestamps, JSON helpers
 │   ├── run_utils.py        # run_safe / run_safe_steps
+│   ├── http_client.py      # curl_cffi-backed HTTP client (TLS/JA3-JA4 impersonation)
 │   ├── browseUrl.py
 │   ├── crtsh.py
 │   ├── dns_info.py
@@ -149,6 +155,7 @@ cyberrecon/
 - **API errors**: verify keys and quotas in `modules/config.py`; confirm outbound HTTPS access.
 - **Nmap not found**: install Nmap and ensure `nmap` is on `PATH`.
 - **Permission errors on `results/`**: ensure the process can create and write `results/` (e.g. `chmod` / ownership).
+- **Requests still getting blocked by a WAF**: check that `tls_impersonate` in `modules/config.py` matches a target curl_cffi supports (see `curl_cffi.requests.impersonate.BrowserType`) and that it agrees with the browser family/version in `header_default`'s User-Agent.
 
 ## Security and legal use
 
@@ -160,4 +167,4 @@ MIT — see [LICENSE](LICENSE).
 
 ## Acknowledgments
 
-Third-party services and projects used by the modules include (non-exhaustive): SSL Labs, Security Headers, Mozilla HTTP Observatory, Hunter.io, WhatCMS, Wappalyzer, Shodan, Censys, crt.sh, and urlscan.io, depending on configuration and module selection.
+Third-party services and projects used by the modules include (non-exhaustive): SSL Labs, Security Headers, Mozilla HTTP Observatory, Hunter.io, WhatCMS, Wappalyzer, Shodan, Censys, crt.sh, urlscan.io, SerpApi, and DuckDuckGo/Bing/Startpage (dorking fallback), depending on configuration and module selection.
